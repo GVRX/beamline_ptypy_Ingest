@@ -1,0 +1,15 @@
+<hdf5_layout>
+  <group name="entry" compress="true">
+    <dataset name="data"        source="NDArray"     dims="N,Y,X"   type="UInt16"/>
+    <dataset name="pos"         source="NDAttribute" ndattribute="POS"      dims="N,2"   type="Float64"/>
+    <dataset name="posy_m"      source="NDAttribute" ndattribute="POSY"     dims="N"     type="Float64"/>
+    <dataset name="posx_m"      source="NDAttribute" ndattribute="POSX"     dims="N"     type="Float64"/>
+    <dataset name="energy_eV"   source="NDAttribute" ndattribute="ENERGY"   dims="N"     type="Float64"/>
+    <dataset name="det_dist_m"  source="NDAttribute" ndattribute="DET_DIST" dims="Scalar" type="Float64"/>
+    <dataset name="pixel_m"     source="NDAttribute" ndattribute="PIXEL"    dims="Scalar" type="Float64"/>
+    <dataset name="exposure_s"  source="NDAttribute" ndattribute="EXPOSE"   dims="N"     type="Float64"/>
+    <dataset name="mask" source="NDAttribute" ndattribute="MASK" dims="Y,X" type="UInt8" optional="true"/>
+    <dataset name="dark" source="NDAttribute" ndattribute="DARK" dims="Y,X" type="Float32" optional="true"/>
+    <dataset name="flat" source="NDAttribute" ndattribute="FLAT" dims="Y,X" type="Float32" optional="true"/>
+  </group>
+</hdf5_layout>

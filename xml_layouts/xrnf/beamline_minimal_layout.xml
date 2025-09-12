@@ -1,0 +1,9 @@
+<hdf5_layout>
+  <group name="entry" compress="true">
+    <dataset name="data"        source="NDArray"     dims="N,Y,X"   type="UInt16"/>
+    <dataset name="pos"         source="NDAttribute" ndattribute="POS"      dims="N,2"   type="Float64"/>
+    <dataset name="energy_eV"   source="NDAttribute" ndattribute="ENERGY"   dims="N"     type="Float64"/>
+    <dataset name="det_dist_m"  source="NDAttribute" ndattribute="DET_DIST" dims="Scalar" type="Float64"/>
+    <dataset name="pixel_m"     source="NDAttribute" ndattribute="PIXEL"    dims="Scalar" type="Float64"/>
+  </group>
+</hdf5_layout>
