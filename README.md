@@ -193,6 +193,71 @@ p.engines=u.Param(); p.engines.e1=u.Param(); p.engines.e1.name='DM'; p.engines.e
 P = ptypy.core.Ptycho(p)
 ```
 
+## Data Quality Evaluation (`ingest/evaluate.py`)
+
+The `ingest/evaluate.py` module provides a lightweight, platform-independent quality-control step for ptychography datasets (CXI/HDF5).  
+It is designed to be run **before reconstruction** to identify unusual diffraction frames, reject unstable measurements, and generate scan-space diagnostic maps.
+
+### Features
+
+- **Unsupervised outlier detection**
+  - Combines robust feature deviation (intensity, COM shifts, radial energy distribution, speckle contrast, similarity to a reference) with PCA reconstruction error of low-dimensional embeddings.
+  - Produces a per-frame **anomaly score** (0–1 normalized).
+
+- **Reject lists**
+  - Flexible modes:
+    - `--reject-topk K` → reject K worst frames.
+    - `--reject-topp p` → reject top *p* fraction (0–1).
+    - `--reject-thresh T` → reject all with score ≥ T.
+  - Outputs:
+    - `accept_indices.npy`, `reject_indices.npy`, `mask_indices.npy`.
+
+- **Scan-space masking**
+  - Restrict evaluation to a **rectangular** (`--rect CX CY W H`) or **circular** (`--circ CX CY R`) region in stage coordinates.
+
+- **Diagnostic maps**
+  - **Deviation score** map (unsupervised outlier score).
+  - **STXM** map (log-intensity sum per scan position).
+  - **DPC-X / DPC-Y** maps (center-of-mass shifts in x,y).
+  - Combined as a 4-panel `qc_maps.png`.
+
+- **PtyPy integration**
+  - `--emit-ptypy-json path.json` writes a JSON fragment with CXI paths and accepted/rejected index lists.
+  - Can be consumed by the `PtyScan`/ingest layer to automatically exclude bad frames.
+
+- **Thumbnail gallery**
+  - `--thumbs-topk N` → save top-N outlier frames as PNG thumbnails.
+  - Generates an `index.html` gallery (with positions and scores).
+
+### Example Usage
+
+```bash
+python ingest/evaluate.py /path/to/data.cxi \
+  --data-path /entry_1/data/data \
+  --pos-x-path /entry_1/instrument/positioners/x \
+  --pos-y-path /entry_1/instrument/positioners/y \
+  --roi 1024 --bin 4 --embed-side 32 --pca-k 12 --w-feat 0.5 \
+  --reject-topp 0.02 --rect 0 0 50 50 \
+  --emit-ptypy-json qc_run/ptypy_indices.json \
+  --thumbs-topk 48 --thumbs-size 256 \
+  --out qc_run
+Outputs
+qc_maps.png — deviation/STXM/DPC maps.
+
+outlier_score.npy — per-frame anomaly scores.
+
+stxm.npy, dpcx.npy, dpcy.npy — scan-contrast maps.
+
+accept_indices.npy, reject_indices.npy, mask_indices.npy — for pipeline filtering.
+
+qc_summary.csv — tabular results (index, pos, scores, mask/reject flags).
+
+qc_meta.json — run configuration metadata.
+
+ptypy_indices.json (if requested) — compact JSON fragment for PtyPy ingress.
+
+thumbs/index.html — outlier thumbnails gallery.
+
 ---
 
 ## areaDetector HDF5 XML (beamline CXI‑like)
