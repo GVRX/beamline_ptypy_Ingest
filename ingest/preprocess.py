@@ -4,17 +4,44 @@ from typing import Optional, Tuple, Literal
 Grouping = Literal['sum','mean','first','best','none']
 FlipOpt = Literal['none','h','v','hv','vh']
 
-def orient(arr: np.ndarray, rotate: int = 0, flip: FlipOpt = 'none') -> np.ndarray:
+def orient(img: np.ndarray,
+           rotate: int = 0,
+           flip: str | None = None) -> np.ndarray:
+    """
+    Re-orient a diffraction image.
+
+    Parameters
+    ----------
+    img : ndarray
+        2D image.
+    rotate : {0, 90, 180, 270}
+        Degrees of **clockwise** rotation to apply.
+    flip : {'h', 'horizontal', 'v', 'vertical', None}
+        Optional flip applied *after* rotation.
+
+    Returns
+    -------
+    ndarray
+        Reoriented image (shape will swap for 90/270 if img is non-square).
+    """
     if rotate not in (0, 90, 180, 270):
-        raise ValueError(f'rotate must be 0|90|180|270, got {rotate}')
-    out = arr
-    if rotate:
-        k = rotate // 90
-        out = np.rot90(out, k=k, axes=(-2, -1))
-    if flip in ('h','hv','vh'):
-        out = np.flip(out, axis=-1)
-    if flip in ('v','hv','vh'):
-        out = np.flip(out, axis=-2)
+        raise ValueError(f"rotate must be one of 0, 90, 180, 270 (got {rotate})")
+
+    out = img
+    # numpy.rot90 uses CCW for positive k; we want CW => use negative k
+    k = (rotate // 90) % 4
+    if k:
+        out = np.rot90(out, k=-k)  # negative = clockwise
+
+    if flip in ('h', 'horizontal', True):
+        out = np.fliplr(out)
+    elif flip in ('v', 'vertical'):
+        out = np.flipud(out)
+    elif flip is None:
+        pass
+    else:
+        raise ValueError(f"flip must be 'h'/'horizontal', 'v'/'vertical', or None (got {flip})")
+
     return out
 
 def apply_dark_flat(imgs: np.ndarray,

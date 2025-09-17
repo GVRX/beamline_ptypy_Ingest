@@ -1,3 +1,11 @@
 numpy
 h5py
 tifffile
+scipy
+matplotlib
+pyzmq
+mpi4py
+packaging
+pillow
+pyfftw
+pyyaml  

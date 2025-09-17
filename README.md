@@ -324,7 +324,7 @@ python -m beamline_ptypy_ingest.ingest_tiff   --pattern "$1" --sidecar "$2" --ou
 
 ```bash
 python tests/synth_make_small_dataset.py  # writes synth.h5
-python -m beamline_ptypy_ingest.ingest_hdf5   --input synth.h5 --output synth_std.h5   --roi 512,512 --roi-center 0.5,0.5 --rotate 90 --flip v
+python -m ingest.ingest_hdf5   --input synth.h5 --output synth_std.h5   --roi 512,512 --roi-center 0.5,0.5 --rotate 90 --flip v
 python examples/ptypy_recipe_hdf5.py --data synth_std.h5
 ```
 

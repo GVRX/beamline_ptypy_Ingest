@@ -247,7 +247,7 @@ def main():
             wtr.writerow([i, float(px[i]), float(py[i]), float(score[i]), float(stxm[i]), float(dpcx[i]), float(dpcy[i]), bool(mask[i]), bool(i in reject_set)])
     meta = {"cxi": os.path.abspath(args.cxi), "data_path": data_path, "pos_x_path": args.pos_x_path, "pos_y_path": args.pos_y_path}
     with open(os.path.join(args.out,"qc_meta.json"),"w") as f: json.dump(meta,f,indent=2)
-    if args.emit_pty_py_json := args.emit_ptypy_json:
+    if args.emit_pty_py_json:
         pjson = {
             "cxi_path": os.path.abspath(args.cxi),
             "data_path": data_path,
