@@ -37,7 +37,7 @@ def orient(img: np.ndarray,
         out = np.fliplr(out)
     elif flip in ('v', 'vertical'):
         out = np.flipud(out)
-    elif flip is None:
+    elif  flip in ('none', None):
         pass
     else:
         raise ValueError(f"flip must be 'h'/'horizontal', 'v'/'vertical', or None (got {flip})")

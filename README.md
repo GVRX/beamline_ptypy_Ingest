@@ -7,7 +7,7 @@ This README explains how to turn soft–X-ray ptychography data into a **standar
 
 It also includes a minimal **`PtyScan` subclass** sketch if you want to stream TIFFs directly into PtyPy.
 
-> **Multi‑beamline note:** This kit is generic. Use beamline‑specific **XML layouts** and optional **wrapper scripts** to adapt paths/NDAttributes for each facility (e.g., HERMES @ SOLEIL, XRNF @ Australian Synchrotron) while keeping a **single code base**.
+> **Multi‑beamline note:** This kit is generic. Use beamline‑specific **XML layouts** and optional **wrapper scripts** to adapt paths/NDAttributes for each facility (e.g., XRNF @ Australian Synchrotron, others...) while keeping a **single code base**.
 
 ---
 
@@ -303,7 +303,7 @@ python -m beamline_ptypy_ingest.ingest_tiff   --pattern "$1" --sidecar "$2" --ou
 
 ## Performance tips
 
-- Use **ROI** (e.g., 1024×1024) centred on the diffraction disc for speed.  
+- Use **ROI** (e.g., 1024×1024) centred on the optical axis for speed.  
 - For **9–9000 positions**, stream in blocks (`Full`/`BlockFull` in PtyPy) and pre‑group frames to limit memory.  
 - Prefer **NVMe** local scratch for raw stacks and write recon outputs to a separate path to avoid I/O contention.  
 - On GPU nodes, switch to the `*_cupy` engines in your PtyPy params.

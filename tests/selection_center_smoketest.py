@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
-from beamline_ptypy_ingest.preprocess import select_by_position, mean_center_of_mass
+from ingest.preprocess import select_by_position, mean_center_of_mass
 def assert_true(cond, msg):
     if not cond: raise AssertionError(msg)
 def test_selection():
