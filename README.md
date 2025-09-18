@@ -5,7 +5,7 @@ This README explains how to turn soft–X-ray ptychography data into a **standar
 - **HDF5** from areaDetector NDFileHDF5 (preferred), or  
 - **Numbered TIFFs** with a small **HDF5 sidecar** for per‑frame metadata.
 
-It also includes a minimal **`PtyScan` subclass** sketch if you want to stream TIFFs directly into PtyPy.
+It also includes a minimal **`PtyScan` subclass** sketch if you want to stream TIFFs directly into PtyPy (see https://ptypy.org).
 
 > **Multi‑beamline note:** This kit is generic. Use beamline‑specific **XML layouts** and optional **wrapper scripts** to adapt paths/NDAttributes for each facility (e.g., XRNF @ Australian Synchrotron, others...) while keeping a **single code base**.
 
