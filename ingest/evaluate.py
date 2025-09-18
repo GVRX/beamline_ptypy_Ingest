@@ -322,7 +322,7 @@ def plot_qc_maps(deviation_score, stxm, dpcx, dpcy, pos_x, pos_y, QC_DIR):
     axs[0,0].set_title('Deviation score'); axs[0,0].axis('off')
     fig.colorbar(im0, ax=axs[0,0], fraction=0.046, pad=0.04)
 
-    # 2) STXM (log1p sum)
+    # 2) STXM (log1p sum) 
     img, xe, ye = grid_average(stxm, pos_x, pos_y)
     im1 = axs[0,1].imshow(img, origin='lower',
                         extent=(xe[0], xe[-1], ye[0], ye[-1]))
