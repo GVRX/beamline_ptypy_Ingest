@@ -50,9 +50,12 @@ def apply_dark_flat(imgs: np.ndarray,
     arr = imgs.astype(np.float32, copy=True)
     if dark is not None:
         arr = arr - (dark if arr.ndim == 2 else dark[np.newaxis, ...])
+        arr = np.clip(arr, 0, 65535, out=arr)
     if flat is not None:
         eps = 1e-8
         arr = arr / ((flat if arr.ndim == 2 else flat[np.newaxis, ...]) + eps)
+        arr = np.clip(arr, 0, 65535, out=arr)
+
     return arr
 
 def build_mask(imgs: np.ndarray,
@@ -162,12 +165,15 @@ def mean_center_of_mass(stack: np.ndarray, weights: Optional[np.ndarray]=None) -
         raise ValueError("mean_center_of_mass expects a stack (N,Y,X)")
     N = stack.shape[0]
     cys, cxs, w = [], [], []
+    meanImg = np.empty_like(stack[0])
     for i in range(N):
         cy, cx = center_of_mass(stack[i])
         cys.append(cy); cxs.append(cx)
         w.append(stack[i].sum() if weights is None else weights[i])
+        meanImg =  np.add(meanImg, np.divide(stack[i],N))
     w = np.asarray(w, dtype=np.float64)
     w = np.clip(w, 0, None)
     if w.sum() == 0:
         return (float(np.mean(cys)), float(np.mean(cxs)))
-    return (float(np.average(cys, weights=w)), float(np.average(cxs, weights=w)))
+    return (float(np.average(cys, weights=w)), float(np.average(cxs, weights=w))), meanImg
+

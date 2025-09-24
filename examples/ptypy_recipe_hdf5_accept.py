@@ -111,6 +111,7 @@ def filter_hdf5_by_indices(src_h5: Path, dst_h5: Path, accept_idx, verbose=True)
                         sub = g.create_dataset(dsname, data=dsobj[()])
                         for ak, av in dsobj.attrs.items():
                             sub.attrs[ak] = av
+       
     return str(dst_h5)
 
 def main():
@@ -119,7 +120,7 @@ def main():
     parser.add_argument("--engine", default="DM", help="PtyPy engine name (e.g., DM)")
     parser.add_argument("--iters", type=int, default=200, help="Iteration count")
     parser.add_argument("--output", default=None, help="Optional output directory for results/logs")
-
+   
     # New args for masking:
     parser.add_argument("--ptypy-indices", default=None, help="JSON file with 'accept_indices' list")
     parser.add_argument("--indices-key", default="accept_indices", help="Key name in the JSON (default: accept_indices)")
@@ -164,6 +165,7 @@ def main():
            "--data", str(run_path),
            "--engine", str(args.engine),
            "--iters", str(args.iters)]
+   
     if args.output:
         cmd += ["--output", str(args.output)]
     # pass through any extra switches unknown to this wrapper

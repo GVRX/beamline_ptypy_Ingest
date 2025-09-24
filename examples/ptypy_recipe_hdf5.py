@@ -17,7 +17,17 @@ ptypy.load_ptyscan_module("hdf5_loader")
 p = u.Param()
 p.verbose_level = "interactive"
 p.io = u.Param()
-p.io.autosave = u.Param(active=False)
+p.io.autosave = u.Param(active=True)
+p.io.autosave.interval = 5
+
+p.io.autoplot = u.Param()
+p.io.autoplot.active = True
+#p.io.autoplot.threaded = True
+p.io.autoplot.interval = 1
+p.io.autoplot.layout = "python"
+
+
+
 p.io.interaction = u.Param(active=False)
 p.scans = u.Param()
 p.scans.s1 = u.Param()
@@ -36,7 +46,9 @@ p.scans.s1.data.positions = u.Param(file=args.data, slow_key="/entry/posy_m", fa
 p.scans.s1.data.recorded_energy   = u.Param(file=args.data, key="/entry/energy_eV", multiplier=1e-3)
 p.scans.s1.data.recorded_distance = u.Param(file=args.data, key="/entry/det_dist_m")
 p.scans.s1.data.recorded_psize    = u.Param(file=args.data, key="/entry/pixel_m")
-p.engines = u.Param(); p.engines.e = u.Param(name=args.engine, numiter=args.iters)
+p.engines = u.Param();
+p.engines.e = u.Param(name=args.engine, numiter=args.iters)
+p.verbose_level = 3 # detailed output
 
 # Run the reconstruction
 P = ptypy.core.Ptycho(p, level=5)

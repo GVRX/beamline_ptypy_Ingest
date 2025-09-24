@@ -107,8 +107,8 @@ def read_positions(h, posx_path, posy_path, n=None):
         raise KeyError("Could not find scan position datasets. Provide --pos-x-path and --pos-y-path.")
     
     else:
-        x = np.asarray(h[posx_path][...], dtype=np.float64).reshape(-1)[:n]
-        y = np.asarray(h[posy_path][...], dtype=np.float64).reshape(-1)[:n]
+        x = np.asarray(h[posx_path][...], dtype=np.float64)#.reshape(-1)[:n]
+        y = np.asarray(h[posy_path][...], dtype=np.float64)#.reshape(-1)[:n]
 
     return x, y
 
@@ -126,7 +126,8 @@ def preprocess_frame(img, roi, log=True):
         h,w = A.shape; m = min(h,w,roi)
         y0 = (h-m)//2; x0 = (w-m)//2
         A = A[y0:y0+m, x0:x0+m]
-    if log: A = np.log1p(A)
+    if log: 
+        A = np.log1p(A)
     return A
 
 def downsample(img, target):
@@ -135,35 +136,55 @@ def downsample(img, target):
     return bin_ndarray(img,(target,target),op=np.mean)
 
 def compute_features_and_embeddings(h, data_path, roi, bin_factor, embed_side, batch=32, reference_mode="median"):
-    ds = h[data_path]; n = ds.shape[0]
-    feats=[]; embeds=[]; sums = np.zeros(n); dpcx=np.zeros(n); dpcy=np.zeros(n)
-    ref_accum=[]; ref=None
+    ds = h[data_path]
+    n = ds.shape[0]
+    feats=[]
+    embeds=[]
+    sums = np.zeros(n) 
+    dpcx=np.zeros(n)
+    dpcy=np.zeros(n)
+    ref_accum=[]
+    ref=None
     if reference_mode in {"mean","median"}:
         sample_count=0
         for i,j,chunk in iter_frames(ds,batch=batch):
             for frame in chunk:
-                A = preprocess_frame(frame, roi=roi, log=True); ref_accum.append(A); sample_count+=1
-                if sample_count>=min(256,n): break
-            if sample_count>=min(256,n): break
+                A = preprocess_frame(frame, roi=roi, log=True)
+                ref_accum.append(A)
+                sample_count+=1
+                if sample_count>=min(256,n): 
+                    break
+            if sample_count>=min(256,n): 
+                break
         ref = np.mean(ref_accum,axis=0) if reference_mode=="mean" else np.median(ref_accum,axis=0)
+    
     k=0
     for i,j,chunk in iter_frames(ds,batch=batch):
         for frame in chunk:
             A = preprocess_frame(frame, roi=roi, log=True)
-            total=float(A.sum()); vmax=float(A.max())
-            cx,cy = center_of_mass(A); h0,w0 = A.shape
-            dx=(cx-(w0-1)/2.0)/max(1.0,w0-1); dy=(cy-(h0-1)/2.0)/max(1.0,h0-1)
+            total=float(A.sum()); 
+            vmax=float(A.max())
+            cx,cy = center_of_mass(A); 
+            h0,w0 = A.shape
+            dx=(cx-(w0-1)/2.0)/max(1.0,w0-1); 
+            dy=(cy-(h0-1)/2.0)/max(1.0,h0-1)
             varx=float(((A*((np.arange(w0)-cx)**2)).sum()/(A.sum()+EPS)))
             vary=float(((A.T*((np.arange(h0)-cy)**2)).sum()/(A.sum()+EPS)))
             rad=radial_energy_fractions(A)
-            q=max(4, min(h0,w0)//4); y0=(h0-q)//2; x0=(w0-q)//2
-            central=A[y0:y0+q, x0:x0+q]; sc=float(central.std()/(central.mean()+EPS))
+            q=max(4, min(h0,w0)//4); 
+            y0=(h0-q)//2; x0=(w0-q)//2
+            central=A[y0:y0+q, x0:x0+q]; 
+            sc=float(central.std()/(central.mean()+EPS))
             sim=normalized_xcorr(A,ref) if ref is not None else 0.0
             feats.append(np.concatenate([[total,vmax,dx,dy,varx,vary,sc,sim],rad]))
             A2 = A[::bin_factor,::bin_factor] if bin_factor>1 else A
-            A3 = downsample(A2, embed_side); embeds.append(A3.ravel())
-            sums[k]=total; dpcx[k]=dx; dpcy[k]=dy; k+=1
-    return np.vstack(feats), np.vstack(embeds), sums, dpcx, dpcy
+            A3 = downsample(A2, embed_side)
+            embeds.append(A3.ravel())
+            sums[k]=total
+            dpcx[k]=dx
+            dpcy[k]=dy
+            k+=1
+    return np.vstack(feats), np.vstack(embeds), sums, dpcx, dpcy, ref
 
 def build_scan_mask(px, py, rect=None, circ=None):
     mask = np.ones_like(px, dtype=bool)
@@ -299,14 +320,19 @@ def grid_average(values, pos_x, pos_y, grid_shape=None):
         Gy, Gx = grid_shape
 
     sum_img, xedges, yedges = np.histogram2d(
-        pos_x, pos_y, bins=[Gx, Gy],
-        range=[[pos_x.min(), pos_x.max()], [pos_y.min(), pos_y.max()]],
-        weights=values
-    )
+                                    pos_x, 
+                                    pos_y, 
+                                    bins=[Gx, Gy],
+                                    range=[[pos_x.min(), pos_x.max()], [pos_y.min(), pos_y.max()]],
+                                    weights=values
+                                )
     cnt_img, _, _ = np.histogram2d(
-        pos_x, pos_y, bins=[Gx, Gy],
-        range=[[pos_x.min(), pos_x.max()], [pos_y.min(), pos_y.max()]]
-    )
+                    pos_x, 
+                    pos_y, 
+                    bins=[Gx, Gy],
+                    range=[[pos_x.min(), pos_x.max()], [pos_y.min(), pos_y.max()]]
+                    )  
+    
     with np.errstate(invalid='ignore'):
         img = sum_img / np.maximum(cnt_img, 1)
     return img.T, xedges, yedges, cnt_img.T  # (Gy,Gx) image and edges
@@ -319,70 +345,102 @@ def plot_qc_maps(deviation_score, stxm, dpcx, dpcy, pos_x, pos_y, QC_DIR):
     img, xe, ye, _ = grid_average(deviation_score, pos_x, pos_y, grid_shape=None)
     im0 = axs[0,0].imshow(img, origin='lower',
                         extent=(xe[0], xe[-1], ye[0], ye[-1]))
-    axs[0,0].set_title('Deviation score'); axs[0,0].axis('off')
+    axs[0,0].set_title('Deviation score'); 
+    axs[0,0].axis('off')
     fig.colorbar(im0, ax=axs[0,0], fraction=0.046, pad=0.04)
 
     # 2) STXM (log1p sum) 
-    img, xe, ye = grid_average(stxm, pos_x, pos_y)
+    img, xe, ye, _ = grid_average(stxm, pos_x, pos_y)
     im1 = axs[0,1].imshow(img, origin='lower',
                         extent=(xe[0], xe[-1], ye[0], ye[-1]))
-    axs[0,1].set_title('STXM (log1p sum)'); axs[0,1].axis('off')
+    axs[0,1].set_title('STXM (log1p sum)'); 
+    axs[0,1].axis('off')
     fig.colorbar(im1, ax=axs[0,1], fraction=0.046, pad=0.04)
 
     # 3) DPC-X (COM x)
-    img, xe, ye = grid_average(dpcx, pos_x, pos_y)
+    img, xe, ye, _ = grid_average(dpcx, pos_x, pos_y)
     im2 = axs[1,0].imshow(img, origin='lower',
                         extent=(xe[0], xe[-1], ye[0], ye[-1]))
-    axs[1,0].set_title('DPC-X (COM shift x)'); axs[1,0].axis('off')
+    axs[1,0].set_title('DPC-X (COM shift x)'); 
+    axs[1,0].axis('off')
     fig.colorbar(im2, ax=axs[1,0], fraction=0.046, pad=0.04)
 
     # 4) DPC-Y (COM y)
-    img, xe, ye = grid_average(dpcy, pos_x, pos_y)
+    img, xe, ye, _ = grid_average(dpcy, pos_x, pos_y)
     im3 = axs[1,1].imshow(img, origin='lower',
                         extent=(xe[0], xe[-1], ye[0], ye[-1]))
-    axs[1,1].set_title('DPC-Y (COM shift y)'); axs[1,1].axis('off')
+    axs[1,1].set_title('DPC-Y (COM shift y)'); 
+    axs[1,1].axis('off')
     fig.colorbar(im3, ax=axs[1,1], fraction=0.046, pad=0.04)
 
     fig.suptitle('QC panel: Outliers / STXM / DPC-Y / DPC-X')
     fig.tight_layout(rect=[0, 0.03, 1, 0.96])
     fig.savefig(os.path.join(QC_DIR,"qc_maps.png"), dpi=150)
 
+def evaluate(args):
+    '''
+    args is a dictionary containing key-value pairs —   See implementation of argparse in main() 
+    for description and defaults.
+    
+        cxi
+        data-path
+        pos-x-path
+        pos-y-path
+        roi
+        bin
+        embed-side
+        pca-k
+        w-feat
+        batch
+        out
+        action
+        save-embeddings
+        reject-topk
+        reject-topp
+        reject-thresh
+        rect
+        circ
+        emit-ptypy-json
+        thumbs-topk
+        thumbs-size
 
-def main():
-    ap = argparse.ArgumentParser(description="Outlier + STXM/DPC map builder for ptychography CXI/HDF5 stacks")
-    ap.add_argument("cxi"); ap.add_argument("--data-path",default=None)
-    ap.add_argument("--pos-x-path",default=None); 
-    ap.add_argument("--pos-y-path",default=None)
-    ap.add_argument("--roi",type=int,default=None); 
-    ap.add_argument("--bin",dest="bin_factor",type=int,default=1)
-    ap.add_argument("--embed-side",type=int,default=32); 
-    ap.add_argument("--pca-k",type=int,default=12)
-    ap.add_argument("--w-feat",type=float,default=0.5); 
-    ap.add_argument("--batch",type=int,default=32)
-    ap.add_argument("--out",default="ptycho_maps_out"); 
-    ap.add_argument("--no-plot",action="store_true")
-    ap.add_argument("--save-embeddings",action="store_true")
-    ap.add_argument("--reject-topk",type=int,default=0); 
-    ap.add_argument("--reject-topp",type=float,default=0.0)
-    ap.add_argument("--reject-thresh",type=float,default=None)
-    ap.add_argument("--rect",nargs=4,type=float,metavar=("CX","CY","W","H"))
-    ap.add_argument("--circ",nargs=3,type=float,metavar=("CX","CY","R"))
-    ap.add_argument("--emit-ptypy-json",default=None)
-    ap.add_argument("--thumbs-topk",type=int,default=0)
-    ap.add_argument("--thumbs-size",type=int,default=256)
-    args = ap.parse_args(); os.makedirs(args.out, exist_ok=True)
-
+       
+        
+     
+    '''
+    
     with h5py.File(args.cxi,"r") as h:
         data_path = args.data_path or auto_find_path(h, COMMON_DATA_CANDIDATES)
-        if data_path is None: raise KeyError("Could not auto-detect diffraction stack path. Provide --data-path.")
+        if data_path is None: 
+            raise KeyError("Could not auto-detect diffraction stack path. Provide --data-path.")
         ds = h[data_path]
-        if ds.ndim != 3: raise ValueError(f"Expected stack shape (N,H,W); got {ds.shape}")
-        N = ds.shape[0]; px,py = read_positions(h, args.pos_x_path, args.pos_y_path, N)
+
+
+        
+        if ds.dtype != np.uint32: 
+            print(f'[Warning] data dtype is {ds.dtype}, casting to uint32')
+            ds = ds.astype(np.uint32)
+
+
+        if ds.ndim != 3: 
+            raise ValueError(f"Expected stack shape (N,H,W); got {ds.shape}")
+        
+        N = ds.shape[0]; 
+        px,py = read_positions(h, args.pos_x_path, args.pos_y_path, N)
         mask = build_scan_mask(px, py, rect=args.rect, circ=args.circ)
-        feats, embeds, stxm, dpcx, dpcy = compute_features_and_embeddings(h, data_path, roi=args.roi, bin_factor=args.bin_factor, embed_side=args.embed_side, batch=args.batch, reference_mode="median")
+        feats, embeds, stxm, dpcx, dpcy, mean = compute_features_and_embeddings(h, 
+                                                                          data_path, 
+                                                                          roi=args.roi, 
+                                                                          bin_factor=args.bin_factor, 
+                                                                          embed_side=args.embed_side, 
+                                                                          batch=args.batch, 
+                                                                          reference_mode="median")
+    
+    print(f"[info] data shape: {ds.shape}, n_frames={N}, n_masked={np.sum(~mask)}")
     
     z, med, mad = robust_scale(feats, axis=0)
     feat_dev = np.sqrt((z*z).sum(axis=1)/z.shape[1])
+    print(f"[info] feature deviation: median={np.median(feat_dev):.4g}, mad={np.median(np.abs(feat_dev - np.median(feat_dev))):.4g}")
     recon_err = pca_recon_error(embeds, k=args.pca_k)
 
     def rank_norm(v):
@@ -415,6 +473,34 @@ def main():
     np.save(os.path.join(args.out,"reject_indices.npy"), reject_by)
     np.save(os.path.join(args.out,"accept_indices.npy"), accept_by)
 
+
+    # write features to HDF
+    with h5py.File(args.cxi,"a") as h:
+
+        if stxm is not None:
+            try:  # todo: catch specific error of entry already exists
+                e = h.create_group('/entry/qc'); 
+            except:
+                e = h['/entry/qc']
+            stxmGr, _, _, _ = grid_average(stxm, px, py)
+            e.create_dataset('stxm', data=stxmGr)
+
+            deviationGr, _, _, _  = grid_average(score, px, py)
+            e.create_dataset('deviation', data=deviationGr)
+
+            dpcxGr, _, _, _  = grid_average(dpcx, px, py)
+            e.create_dataset('dpcx', data=dpcxGr)
+
+            dpcyGr, _, _, _  = grid_average(dpcy, px, py)
+            e.create_dataset('dpcy', data=dpcyGr)
+
+            e.create_dataset('mean', data=mean)
+
+
+
+
+
+
     import csv
     with open(os.path.join(args.out,"qc_summary.csv"),"w",newline="") as f:
         wtr = csv.writer(f); wtr.writerow(["index","pos_x","pos_y","score","stxm","dpcx","dpcy","masked","rejected"])
@@ -437,29 +523,7 @@ def main():
         with open(args.emit_ptypy_json, "w") as f: json.dump(pjson, f, indent=2)
     
     if _HAVE_PLT and not args.no_plot:
-
-        """fig,axs = plt.subplots(2,2, figsize=(9,8), dpi=120, constrained_layout=True)
-        ax=axs[0,0]; sc0=ax.scatter(px,py,c=score,s=10,cmap="viridis"); 
-        ax.set_title("Deviation score"); 
-        ax.set_aspect("equal","box"); 
-        plt.colorbar(sc0,ax=ax)
-        ax=axs[0,1]; sc1=ax.scatter(px,py,c=stxm,s=10,cmap="viridis");
-        ax.set_title("STXM (log1p sum)"); 
-        ax.set_aspect("equal","box"); 
-        plt.colorbar(sc1,ax=ax)
-        ax=axs[1,0]; sc2=ax.scatter(px,py,c=dpcx,s=10,cmap="viridis"); 
-        ax.set_title("DPC-X (COM shift x)"); 
-        ax.set_aspect("equal","box"); 
-        plt.colorbar(sc2,ax=ax)
-        ax=axs[1,1]; sc3=ax.scatter(px,py,c=dpcy,s=10,cmap="viridis"); 
-        ax.set_title("DPC-Y (COM shift y)"); 
-        ax.set_aspect("equal","box"); 
-        plt.colorbar(sc3,ax=ax)
-        plt.suptitle("Ptychography QC Maps", y=1.02); 
-        plt.savefig(os.path.join(args.out,"qc_maps.png")); 
-        plt.close(fig) """
         plot_qc_maps(score, stxm, dpcx, dpcy, px, py, args.out,)
-
 
     
     if args.thumbs_topk and args.thumbs_topk>0:
@@ -470,6 +534,39 @@ def main():
         except Exception as e:
             print(f"[warn] thumbnail gallery failed: {e}")
     print(f"Outputs in: {os.path.abspath(args.out)}")
+
+    return feats, embeds, stxm, dpcx, dpcy
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Outlier + STXM/DPC map builder for ptychography CXI/HDF5 stacks")
+    ap.add_argument("cxi"); 
+    ap.add_argument("--data-path",default=None)
+    ap.add_argument("--pos-x-path",default=None); 
+    ap.add_argument("--pos-y-path",default=None)
+    ap.add_argument("--roi",type=int,default=None); 
+    ap.add_argument("--bin",dest="bin_factor",type=int,default=1)
+    ap.add_argument("--embed-side",type=int,default=32); 
+    ap.add_argument("--pca-k",type=int,default=12)
+    ap.add_argument("--w-feat",type=float,default=0.5); 
+    ap.add_argument("--batch",type=int,default=32)
+    ap.add_argument("--out",default="ptycho_maps_out"); 
+    ap.add_argument("--no-plot",action="store_true")
+    ap.add_argument("--save-embeddings",action="store_true")
+    ap.add_argument("--reject-topk",type=int,default=0); 
+    ap.add_argument("--reject-topp",type=float,default=0.0)
+    ap.add_argument("--reject-thresh",type=float,default=None)
+    ap.add_argument("--rect",nargs=4,type=float,metavar=("CX","CY","W","H"))
+    ap.add_argument("--circ",nargs=3,type=float,metavar=("CX","CY","R"))
+    ap.add_argument("--emit-ptypy-json",default=None)
+    ap.add_argument("--thumbs-topk",type=int,default=0)
+    ap.add_argument("--thumbs-size",type=int,default=256)
+
+    args = ap.parse_args(); 
+    os.makedirs(args.out, exist_ok=True)
+
+    evaluate(args)
+    # todo: adapt for non-CLI use, e.g. evaluate(vars(args))
 
 if __name__ == "__main__":
     main()

@@ -52,7 +52,6 @@ def read_positions(h, posx_path, posy_path, n=None):
     return x, y
 
 
-
 def ingest(args):
     
     rotate   = args["rotate"]
@@ -69,18 +68,36 @@ def ingest(args):
     groupFrames = args["grouping"]
     outPath = args["output"]
     writeCenter = args["write_center"]
+    overrideDetDistance = args["overrideDetDistance"]
+    overridePixelSize  = args["overridePixelSize"]  
 
     with h5py.File(args["input"], 'r') as h5:
+
+        print("Loading data from %s" % args["data"])
         data     = load_dset(h5, args["data"]); 
+        print(f'Loaded data from {args["data"]}, shape: {data.shape if data is not None else None}')
+
+        if data.dtype != np.uint32: 
+            print(f'Warning: data dtype is {data.dtype}, casting to uint32')
+            data = data.astype(np.uint32)
+       
+
         #pos      = load_dset(h5, args["pos"])
         energy   = load_dset(h5, args["energy"]); 
+        energy  = energy.astype(float) if energy is not None else None 
         dist     = load_dset(h5, args["distance"]); 
         pix      = load_dset(h5, args["pixel"])
         
 
-        px,py = read_positions(h5, args['pos_x_path'], args['pos_y_path'], data.shape[0]); 
+        #px,py = read_positions(h5, args['pos_x_path'], args['pos_y_path'], data.shape[0]); 
+        px,py = read_positions(h5, args['pos'], args['pos'], data.shape[0]);
         pos = np.stack([px, py], axis=1) if (px is not None and py is not None) else None
         print(f'Loaded positions from {args["pos_x_path"]} and {args["pos_y_path"]}, shape: {pos.shape if pos is not None else None}')
+        print(f'Positions x range: {np.min(px)} to {np.max(px)} m, y range: {np.min(py)} to {np.max(py)} m')
+        # convert to meters:
+        if pos is not None and np.max(np.abs(pos)) > 100: 
+            print('Assuming positions are in um, converting to meters')
+            pos *= 1e-6
     
 
     
@@ -120,9 +137,7 @@ def ingest(args):
     if mask is not None: 
         mask = orient(mask, rotate=rotate, flip=flip)
 
-    if data.dtype != np.uint32: 
-        data = data.astype(np.uint32)
-
+   
     if dark is not None or flat is not None: 
         data = apply_dark_flat(data, dark, flat)
 
@@ -218,7 +233,13 @@ def ingest(args):
         if estimateCenter:
              e.create_dataset('meanData', data=np.array(meanData, dtype=np.uint32))
             
+        if overrideDetDistance is not None and overrideDetDistance > 0:
+            print(f'Overriding detector distance to {overrideDetDistance} m')
+            e.create_dataset('det_dist_m', data=float(overrideDetDistance)) 
 
+        if overridePixelSize is not None and overridePixelSize > 0:
+            print(f'Overriding pixel size to {overridePixelSize} m')
+            e.create_dataset('pixel_m', data=float(overridePixelSize))  
 
    
     print('Wrote %s with shape %r' % (outPath, tuple(data.shape)))
@@ -235,6 +256,7 @@ def main():
     #ap.add_argument('--distance', default='/entry/det_dist_m')
     #ap.add_argument('--pixel', default='/entry/pixel_m')
 
+    
     ap.add_argument('--pos-x-path', default='/posx_m')
     ap.add_argument('--pos-y-path', default='/posy_m')   
     ap.add_argument('--exposure', default='/entry/exposure_s')
@@ -259,6 +281,8 @@ def main():
     ap.add_argument('--write-center', action='store_true')
     ap.add_argument('--grouping', default='sum', choices=['sum','mean','first','best','none']);
     ap.add_argument('--frames-per-pos', type=int, default=1)
+    ap.add_argument("--overrideDetDistance", type=float, default="0.05"),   # in meters
+    ap.add_argument("--overridePixelSize",  type=float, default=None)    # in meters
     
     args = ap.parse_args()
 
