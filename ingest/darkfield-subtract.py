@@ -1,64 +1,61 @@
 #!/usr/bin/env python3
 """
-darkfield-subtract.py
+pad_and_optional_dark.py
 
-Reproduce an HDF5 file, replacing /scan/scan_data/ptycho__image by a processed stack:
-  1) subtract a dark image
-     - from a separate HDF5 stack (--dark-h5), averaged over N frames, OR
-     - from previous options (--dark): npy/image/HDF5 path, or median:N of input
-  2) threshold: values < T -> 0
-  3) zero-pad each frame to S x S
+Clone an HDF5 file while padding a diffraction stack to SxS.
+Optionally:
+  - subtract the mean of a dark-stack HDF5 before padding (only if --subtract-dark),
+  - and always (if provided) write a padded clone of the dark HDF5.
 
-Usage (dark stack in second HDF5):
-  python hdf5_diffraction_process.py \
-    --input in.h5 --output out.h5 \
-    --ptycho-path /scan/scan_data/ptycho__image \
-    --dark-h5 darks.h5 \
-    --dark-h5-path /scan/scan_data/ptycho__image \
-    --threshold 5 --size 2400 --center-pad
+Behavior
+--------
+Main data:
+  /scan/scan_data/ptycho__image (N,H,W) -> (N,S,S)
+  - Always padded.
+  - If --subtract-dark is given:
+      1) dark_mean = average over dark stack frames (float32)
+      2) per-frame: (frame - dark_mean), optional threshold (values < T -> 0), clip to [0, 65535]
+      3) pad to SxS and write
+  - If --subtract-dark is NOT given: just pad (ignore threshold).
 
-Alternative dark sources (mutually exclusive with --dark-h5):
-  --dark median:16
-  --dark dark.npy
-  --dark dark.h5:/group/dset
-  --dark dark.tif   (requires imageio)
+Dark file (if provided):
+  Cloned to --dark-output, padding its /scan/scan_data/ptycho__image to (N,S,S).
+  No subtraction/threshold is applied to the dark output.
 
+Notes
+-----
+--ptycho-path defaults to /scan/scan_data/ptycho__image for both files.
 """
 
 from __future__ import annotations
 import argparse
 import os
-import re
-from typing import Tuple, Optional
+from typing import Tuple
 
 import h5py
 import numpy as np
 
-try:
-    import imageio.v3 as iio  # optional (for TIFF/PNG darks)
-except Exception:
-    iio = None
-
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Process diffraction images in an HDF5 file.")
-    p.add_argument("--input", required=True, help="Input HDF5 file")
-    p.add_argument("--output", required=True, help="Output HDF5 file (will be overwritten)")
+    p = argparse.ArgumentParser(description="Pad diffraction stacks; optionally subtract dark and/or write padded dark file.")
+    p.add_argument("--input", required=True, help="Input HDF5 (main data)")
+    p.add_argument("--output", required=True, help="Output HDF5 for processed main data (will be overwritten)")
     p.add_argument("--ptycho-path", default="/scan/scan_data/ptycho__image",
-                   help="Path to the diffraction stack dataset (default: /scan/scan_data/ptycho__image)")
-
-    # Mutually exclusive dark options
-    g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--dark", help="Dark image spec: npy/image/HDF5 'file.h5:/path', or 'median:N'")
-    g.add_argument("--dark-h5", help="HDF5 file containing a dark stack to average")
-
-    p.add_argument("--dark-h5-path", default=None,
-                   help="Dataset path inside --dark-h5 (default: same as --ptycho-path)")
-    p.add_argument("--threshold", type=float, required=True, help="Threshold T (values < T -> 0 after subtraction)")
+                   help="Dataset path of diffraction stack in both files (default: /scan/scan_data/ptycho__image)")
     p.add_argument("--size", type=int, required=True, help="Target padded size S (output frames are SxS)")
+
+    # Padding placement
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--center-pad", action="store_true", help="Center original frame in the SxS canvas (default)")
     mode.add_argument("--pad-origin", action="store_true", help="Place original frame at top-left (0,0) in the SxS canvas")
+
+    # Optional dark handling
+    p.add_argument("--dark-h5", help="Dark HDF5 file containing a stack to average for subtraction (optional)")
+    p.add_argument("--dark-output", help="Output HDF5 for padded dark file (required if --dark-h5 is set)")
+    p.add_argument("--subtract-dark", action="store_true",
+                   help="If set, subtract mean(dark) from main data before padding (requires --dark-h5).")
+    p.add_argument("--threshold", type=float, default=None,
+                   help="Threshold after subtraction: values < T -> 0. Used only if --subtract-dark is set.")
     return p.parse_args()
 
 
@@ -68,7 +65,10 @@ def copy_attrs(src, dst):
 
 
 def clone_tree_except(in_grp: h5py.Group, out_grp: h5py.Group, skip_path: str):
-    """Clone groups/datasets/attributes, skipping dataset at absolute path 'skip_path'."""
+    """
+    Recursively clone groups/datasets/attributes from in_grp into out_grp,
+    skipping the dataset at absolute path 'skip_path' (to be created later).
+    """
     copy_attrs(in_grp, out_grp)
     for name, obj in in_grp.items():
         if isinstance(obj, h5py.Group):
@@ -95,64 +95,6 @@ def clone_tree_except(in_grp: h5py.Group, out_grp: h5py.Group, skip_path: str):
                     dst[i, ...] = obj[i, ...]
 
 
-def load_dark_from_spec(dark_spec: str, in_file: h5py.File, ptycho_path: str, sample_shape: Tuple[int, int]) -> np.ndarray:
-    """Previous dark loader: npy/image/HDF5 path or median:N."""
-    H, W = sample_shape
-    m = re.fullmatch(r"median:(\d+)", dark_spec.strip(), flags=re.IGNORECASE)
-    if m:
-        n = int(m.group(1))
-        dset = in_file[ptycho_path]
-        n = max(1, min(n, dset.shape[0]))
-        stack = dset[:n, ...].astype(np.float32, copy=False)
-        dark = np.median(stack, axis=0).astype(np.float32, copy=False)
-        if dark.shape != (H, W):
-            raise ValueError(f"Computed dark has shape {dark.shape}, expected {(H,W)}")
-        return dark
-
-    if ".h5:" in dark_spec or ".hdf5:" in dark_spec:
-        fpath, dpath = dark_spec.split(":", 1)
-        with h5py.File(fpath, "r") as f:
-            arr = f[dpath][...]
-    elif dark_spec.lower().endswith(".npy"):
-        arr = np.load(dark_spec)
-    elif dark_spec.lower().endswith((".tif", ".tiff", ".png", ".jpg", ".jpeg")):
-        if iio is None:
-            raise RuntimeError("imageio is required to read image files; please 'pip install imageio'.")
-        arr = iio.imread(dark_spec)
-    else:
-        raise ValueError(f"Unrecognized dark spec: {dark_spec}")
-
-    arr = np.asarray(arr)
-    if arr.ndim == 3 and arr.shape[0] > 1:
-        arr = arr.mean(axis=0)
-    if arr.shape != (H, W):
-        raise ValueError(f"Dark shape {arr.shape} does not match expected {(H,W)}")
-    return arr.astype(np.float32, copy=False)
-
-
-def load_dark_from_h5_stack(dark_h5_path: str, dark_dset_path: str, sample_shape: Tuple[int, int]) -> np.ndarray:
-    """
-    Load dark from an HDF5 file containing a 3D stack (N,H,W) at dark_dset_path.
-    Returns the mean image over N as float32 (shape HxW). Streams frame-by-frame.
-    """
-    H, W = sample_shape
-    with h5py.File(dark_h5_path, "r") as f:
-        if dark_dset_path not in f:
-            raise FileNotFoundError(f"Dataset not found in dark file: {dark_dset_path}")
-        dset = f[dark_dset_path]
-        if dset.ndim != 3:
-            raise ValueError(f"Dark dataset must be 3D (N,H,W); got shape {dset.shape}")
-        N, h, w = dset.shape
-        if (h, w) != (H, W):
-            raise ValueError(f"Dark frame size {h}x{w} does not match sample {H}x{W}")
-
-        acc = np.zeros((H, W), dtype=np.float64)
-        for i in range(N):
-            acc += dset[i, ...].astype(np.float64, copy=False)
-        dark_mean = (acc / float(N)).astype(np.float32)
-        return dark_mean
-
-
 def place_into_canvas(frame: np.ndarray, S: int, centered: bool = True) -> np.ndarray:
     H, W = frame.shape
     out = np.zeros((S, S), dtype=np.uint16)
@@ -166,93 +108,203 @@ def place_into_canvas(frame: np.ndarray, S: int, centered: bool = True) -> np.nd
     return out
 
 
-def maybe_update_dim_attrs(src_ds: h5py.Dataset, dst_ds: h5py.Dataset, new_shape: Tuple[int, int, int]):
-    if "total_dims" in dst_ds.attrs:
-        td = dst_ds.attrs["total_dims"]
-        try:
-            if isinstance(td, (bytes, np.bytes_)):
-                td = td.decode("ascii", errors="ignore")
-            if isinstance(td, str):
-                if "," in td:
-                    sep = ","
-                elif "x" in td or "X" in td:
-                    sep = "x"
-                else:
-                    sep = None
-                if sep:
-                    dst_ds.attrs.modify("total_dims", f"{new_shape[0]}{sep}{new_shape[1]}{sep}{new_shape[2]}")
-        except Exception:
-            pass
+def maybe_update_dim_attrs(dst_ds: h5py.Dataset, new_shape: Tuple[int, int, int]):
+    """
+    If an attribute like 'total_dims' holds a simple shape string, update it.
+    """
+    if "total_dims" not in dst_ds.attrs:
+        return
+    td = dst_ds.attrs["total_dims"]
+    try:
+        if isinstance(td, (bytes, np.bytes_)):
+            td = td.decode("ascii", errors="ignore")
+        if isinstance(td, str):
+            if "," in td:
+                sep = ","
+            elif "x" in td or "X" in td:
+                sep = "x"
+            else:
+                return
+            dst_ds.attrs.modify("total_dims", f"{new_shape[0]}{sep}{new_shape[1]}{sep}{new_shape[2]}")
+    except Exception:
+        pass
 
 
-def main():
-    args = parse_args()
+def compute_dark_mean(dark_file: str, ptycho_path: str, sample_shape: Tuple[int, int]) -> np.ndarray:
+    """
+    Stream-average the dark stack (N,H,W) to a float32 mean image (H,W).
+    """
+    H, W = sample_shape
+    with h5py.File(dark_file, "r") as f:
+        if ptycho_path not in f:
+            raise FileNotFoundError(f"Dark dataset not found: {ptycho_path}")
+        dset = f[ptycho_path]
+        if dset.ndim != 3:
+            raise ValueError(f"Dark dataset must be 3D (N,H,W), got {dset.shape}")
+        N, h, w = dset.shape
+        if (h, w) != (H, W):
+            raise ValueError(f"Dark frames {h}x{w} do not match main data {H}x{W}")
+        acc = np.zeros((H, W), dtype=np.float64)
+        for i in range(N):
+            acc += dset[i, ...].astype(np.float64, copy=False)
+        dark_mean = (acc / float(N)).astype(np.float32)
+        return dark_mean
 
-    if os.path.abspath(args.input) == os.path.abspath(args.output):
-        raise SystemExit("Refusing to overwrite input file; specify a different --output path.")
 
-    S = int(args.size)
-    if S <= 0:
-        raise SystemExit("--size must be positive")
+def create_padded_dataset(parent_grp: h5py.Group, name: str, N: int, S: int, like: h5py.Dataset) -> h5py.Dataset:
+    kwargs = {}
+    chunks = like.chunks if like.chunks is not None else (1, min(S, 512), min(S, 512))
+    kwargs["chunks"] = chunks
+    if like.compression is not None:
+        kwargs["compression"] = like.compression
+    if like.shuffle is not None:
+        kwargs["shuffle"] = like.shuffle
+    if like.fletcher32:
+        kwargs["fletcher32"] = True
+    dst = parent_grp.create_dataset(name, shape=(N, S, S), dtype=np.uint16, **kwargs)
+    return dst
 
-    center = not args.pad_origin  # default True unless --pad-origin
 
-    with h5py.File(args.input, "r") as fin, h5py.File(args.output, "w") as fout:
-        clone_tree_except(fin["/"], fout["/"], skip_path=args.ptycho_path)
+def process_main(input_path: str, output_path: str, ptycho_path: str, S: int,
+                 center: bool, subtract_dark: bool, threshold: float | None,
+                 dark_mean: np.ndarray | None):
+    """
+    Clone input -> output, replacing ptycho_path with padded data.
+    Optionally subtract dark_mean and threshold before padding (only if subtract_dark).
+    """
+    if os.path.abspath(input_path) == os.path.abspath(output_path):
+        raise SystemExit("Refusing to overwrite main input file; choose a different --output path.")
 
-        if args.ptycho_path not in fin:
-            raise SystemExit(f"Dataset not found: {args.ptycho_path}")
+    with h5py.File(input_path, "r") as fin, h5py.File(output_path, "w") as fout:
+        # Clone entire tree except the diffraction stack
+        clone_tree_except(fin["/"], fout["/"], skip_path=ptycho_path)
 
-        src = fin[args.ptycho_path]
+        if ptycho_path not in fin:
+            raise SystemExit(f"Dataset not found in main file: {ptycho_path}")
+        src = fin[ptycho_path]
         if src.ndim != 3:
-            raise SystemExit(f"Expected 3D stack at {args.ptycho_path}, got shape {src.shape}")
+            raise SystemExit(f"Expected 3D stack at {ptycho_path}, got shape {src.shape}")
 
         N, H, W = src.shape
         if H > S or W > S:
             raise SystemExit(f"--size S={S} must be >= original frame size ({H}x{W})")
 
-        # ---- Load/compute dark (float32) ----
-        if args.dark_h5:
-            dark_path = args.dark_h5_path or args.ptycho_path
-            dark = load_dark_from_h5_stack(args.dark_h5, dark_path, (H, W))
-        else:
-            dark = load_dark_from_spec(args.dark, fin, args.ptycho_path, (H, W))
-
-        # ---- Create destination dataset ----
-        parent_path = os.path.dirname(args.ptycho_path.rstrip("/"))
-        name = os.path.basename(args.ptycho_path.rstrip("/"))
+        # Create destination
+        parent_path = os.path.dirname(ptycho_path.rstrip("/"))
+        name = os.path.basename(ptycho_path.rstrip("/"))
         parent_grp = fout[parent_path]
+        dst = create_padded_dataset(parent_grp, name, N, S, like=src)
 
-        kwargs = {}
-        chunks = src.chunks if src.chunks is not None else (1, min(S, 512), min(S, 512))
-        kwargs["chunks"] = chunks
-        if src.compression is not None:
-            kwargs["compression"] = src.compression
-        if src.shuffle is not None:
-            kwargs["shuffle"] = src.shuffle
-        if src.fletcher32:
-            kwargs["fletcher32"] = True
-
-        dst = parent_grp.create_dataset(name, shape=(N, S, S), dtype=np.uint16, **kwargs)
-
-        # Copy attrs and update dimension-like fields
+        # Copy & adjust attrs
         copy_attrs(src, dst)
-        maybe_update_dim_attrs(src, dst, (N, S, S))
+        maybe_update_dim_attrs(dst, (N, S, S))
 
-        # ---- Process frames ----
-        T = float(args.threshold)
+        # Process frames
+        do_subtract = bool(subtract_dark and (dark_mean is not None))
+        T = float(threshold) if (do_subtract and threshold is not None) else None
+
         for i in range(N):
             frame_u16 = src[i, ...]  # uint16
-            f = frame_u16.astype(np.float32, copy=False) - dark
-            f[f < T] = 0.0
-            np.clip(f, 0.0, 65535.0, out=f)
-            f_u16 = f.astype(np.uint16, copy=False)
+            if do_subtract:
+                f = frame_u16.astype(np.float32, copy=False) - dark_mean
+                if T is not None:
+                    f[f < T] = 0.0
+                np.clip(f, 0.0, 65535.0, out=f)
+                f_u16 = f.astype(np.uint16, copy=False)
+            else:
+                f_u16 = frame_u16
+
             out = place_into_canvas(f_u16, S=S, centered=center)
             dst[i, ...] = out
 
         fout.flush()
 
-    print(f"Done. Wrote processed dataset to {args.output}")
+
+def process_dark(dark_input: str, dark_output: str, ptycho_path: str, S: int, center: bool):
+    """
+    Clone dark_input -> dark_output and pad its ptycho_path stack to SxS (no subtraction/threshold).
+    """
+    if os.path.abspath(dark_input) == os.path.abspath(dark_output):
+        raise SystemExit("Refusing to overwrite dark input file; choose a different --dark-output path.")
+
+    with h5py.File(dark_input, "r") as fin, h5py.File(dark_output, "w") as fout:
+        clone_tree_except(fin["/"], fout["/"], skip_path=ptycho_path)
+
+        if ptycho_path not in fin:
+            raise SystemExit(f"Dataset not found in dark file: {ptycho_path}")
+        src = fin[ptycho_path]
+        if src.ndim != 3:
+            raise SystemExit(f"Expected 3D dark stack at {ptycho_path}, got shape {src.shape}")
+
+        N, H, W = src.shape
+        if H > S or W > S:
+            raise SystemExit(f"--size S={S} must be >= dark frame size ({H}x{W})")
+
+        parent_path = os.path.dirname(ptycho_path.rstrip("/"))
+        name = os.path.basename(ptycho_path.rstrip("/"))
+        parent_grp = fout[parent_path]
+        dst = create_padded_dataset(parent_grp, name, N, S, like=src)
+
+        copy_attrs(src, dst)
+        maybe_update_dim_attrs(dst, (N, S, S))
+
+        for i in range(N):
+            frame_u16 = src[i, ...]
+            out = place_into_canvas(frame_u16, S=S, centered=center)
+            dst[i, ...] = out
+
+        fout.flush()
+
+
+def main():
+    args = parse_args()
+
+    S = int(args.size)
+    if S <= 0:
+        raise SystemExit("--size must be positive")
+    center = not args.pad_origin  # default True unless --pad-origin
+
+    # Validate dark options
+    if args.dark_h5 and not args.dark_output:
+        raise SystemExit("--dark-output is required when --dark-h5 is provided.")
+    if args.subtract_dark and not args.dark_h5:
+        raise SystemExit("--subtract-dark requires --dark-h5.")
+
+    # Load dark mean only if we actually subtract
+    dark_mean = None
+    if args.subtract_dark:
+        with h5py.File(args.input, "r") as f:
+            if args.ptycho_path not in f:
+                raise SystemExit(f"Dataset not found in main file: {args.ptycho_path}")
+            main_ds = f[args.ptycho_path]
+            if main_ds.ndim != 3:
+                raise SystemExit(f"Expected 3D stack at {args.ptycho_path}, got shape {main_ds.shape}")
+            _, H, W = main_ds.shape
+        dark_mean = compute_dark_mean(args.dark_h5, args.ptycho_path, (H, W))
+
+    # Process main (subtract & threshold only if --subtract-dark)
+    process_main(
+        input_path=args.input,
+        output_path=args.output,
+        ptycho_path=args.ptycho_path,
+        S=S,
+        center=center,
+        subtract_dark=args.subtract_dark,
+        threshold=args.threshold,
+        dark_mean=dark_mean
+    )
+
+    # If dark provided, also produce padded dark output (always padded; never subtracted)
+    if args.dark_h5:
+        process_dark(
+            dark_input=args.dark_h5,
+            dark_output=args.dark_output,
+            ptycho_path=args.ptycho_path,
+            S=S,
+            center=center
+        )
+
+    print("Done.")
 
 
 if __name__ == "__main__":
